@@ -1,141 +1,109 @@
 package org.cli;
 
-import java.io.BufferedReader;
-import java.io.Console;
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.InputStreamReader;
+import static org.cli.util.GeneicUtil.console;
+import static org.cli.util.GeneicUtil.printUsage;
+
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.FutureTask;
 
+import org.cli.core.Engine;
 import org.cli.helper.ArgParser;
-
-import ch.ethz.ssh2.Connection;
-import ch.ethz.ssh2.Session;
-import ch.ethz.ssh2.StreamGobbler;
+import org.cli.vo.ConnectionDetails;
 
 public class RemoteExec {
+    /** The executor. */
+    private static final ExecutorService executor = Executors
+            .newFixedThreadPool(5);
 
-   static String hostname = null;
-   static String username = null;
-   static String password = null;
-   static String command = null;
+    /**
+     * The main method.
+     * 
+     * @param args
+     *            the arguments
+     */
+    public static void main(String[] args) {
+        RemoteExec exec = new RemoteExec();
+        List<ConnectionDetails> details = parseInput(args);
+System.out.println("Processing..." + details);
+        // I believe people provide commas for miltiple hosts
+        for (ConnectionDetails detail : details) {
+            final FutureTask<String> future = exec.getFutureTask(detail);
+            executor.submit(future);
+        }
+        executor.shutdown();
 
-   static Console console = System.console();
+    }
 
-   /**
-    * The main method.
-    * 
-    * @param args
-    *           the arguments
-    */
-   public static void main(String[] args) {
+    /**
+     * Parses the input.
+     * 
+     * @param args
+     *            the args
+     * @return the list
+     */
+    private static List<ConnectionDetails> parseInput(String[] args) {
+        int i = 0;
+        for (String a: args) {
+            System.out.printf("Argument[%d]  %s\n", i++, a);
+        }
+        if (args.length == 0 || (args.length % 2) != 0) {
+            printUsage();
+        }
+        
+        System.out.println("Parsing input:");
 
-      if (args.length == 0 || (args.length % 2) != 0) {
-         printUsage();
-      }
-      try {
-         ArgParser parser = new ArgParser(args);
-         hostname = parser.getValue("-h");// "cbolw01btst.dev.cbeyond.net";
-         command = parser.getValue("-c");
+        List<ConnectionDetails> details = new ArrayList<ConnectionDetails>();
+        ArgParser parser = new ArgParser(args);
+        String hostnames = parser.getValue("-h");
+        String command = parser.getValue("-c");
+        command = command.replace("^", " ");
+        String username = parser.getValue("-u");
+        String password = parser.getValue("-p");
 
-         username = parser.getValue("-u");
-         password = parser.getValue("-p");
+        if (null == username) {
+            username = console.readLine("User Name to connect to " + hostnames
+                    + "? ");
+        }
 
-         if (null == username) {
-            username = console.readLine("User Name to connect to " + hostname
-                  + "? ");
-         }
-
-         if (null == password) {
+        if (null == password) {
             char[] passwordChar = console.readPassword("Password for "
-                  + username + "? ");
+                    + username + "? ");
             password = new String(passwordChar);
-            // the javadoc for the Console class recommends "zeroing-out" the
+            // the javadoc for the Console class recommends "zeroing-out"
+            // the
             // password
             // when finished verifying it :
             Arrays.fill(passwordChar, ' ');
-         }
-         // Create a connection instance
+        }
 
-         Connection conn = new Connection(hostname);
+        String hosts[] = hostnames.split(",");
+        for (String host : hosts) {
+            ConnectionDetails detail = new ConnectionDetails();
+            detail.setHostname(host);
+            detail.setCommand(command);
+            detail.setUsername(username);
+            detail.setPassword(password);
+            details.add(detail);
+        }
 
-         // Now connect
+        return details;
+    }
 
-         conn.connect();
-
-         // Authenticate
-
-         boolean isAuthenticated = conn.authenticateWithPassword(username,
-               password);
-
-         if (isAuthenticated == false)
-            throw new IOException("Authentication failed.");
-
-         // Create a session
-
-         Session sess = conn.openSession();
-
-         sess.execCommand(command);
-
-         InputStream stdout = new StreamGobbler(sess.getStdout());
-         InputStream stderr = new StreamGobbler(sess.getStderr());
-
-         BufferedReader stdoutReader = new BufferedReader(
-               new InputStreamReader(stdout));
-         BufferedReader stderrReader = new BufferedReader(
-               new InputStreamReader(stderr));
-
-         System.out.println("Here is the output from stdout:");
-
-         while (true) {
-            String line = stdoutReader.readLine();
-            if (line == null)
-               break;
-            System.out.println(line);
-         }
-
-         System.out.println("Here is the output from stderr: Press CTRL+C to break");
-
-         while (true) {
-            String line = stderrReader.readLine();
-            if (line == null)
-               break;
-            System.out.println(line);
-         }
-
-         // Close this session
-
-         sess.close();
-
-         // Close the connection
-
-         conn.close();
-         pressENTER();
-
-      }
-      catch (IOException e) {
-         e.printStackTrace(System.err);
-         printUsage();
-      }
-
-   }
-
-   private static void printUsage() {
-      System.out.println("java org.cli.RemoteExec OPTIONS");
-      System.out.println("OPTIONS:");
-      System.out.println("REQUIRED");
-      System.out.println("-h <hostname> - Supply the hostname to SSH");
-      System.out.println("-c <command>  - The command to be executed");
-      System.out.println("OPTIONAL: It will be prompted");
-      System.out.println("-u <username> - The username to SSH");
-      System.out.println("-p <password> - The password for currently login");
-      pressENTER();
-      System.exit(1);
-   }
-
-   private static void pressENTER() {
-      System.out.println("Press ENTER key to continue...");
-      console.readLine();
-   }
+    /**
+     * Create a future task for the provided URL.
+     * 
+     * @param url
+     *            to download concurrently
+     * @return new Future task instance
+     */
+    public FutureTask<String> getFutureTask(final ConnectionDetails detail) {
+        final FutureTask<String> future = new FutureTask<String>(new Engine(
+                detail));
+        return future;
+    }
 
 }
