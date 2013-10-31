@@ -28,7 +28,7 @@ public class RemoteExec {
     public static void main(String[] args) {
         RemoteExec exec = new RemoteExec();
         List<ConnectionDetails> details = parseInput(args);
-System.out.println("Processing..." + details);
+        System.out.println("Processing..." + details);
         // I believe people provide commas for miltiple hosts
         for (ConnectionDetails detail : details) {
             final FutureTask<String> future = exec.getFutureTask(detail);
